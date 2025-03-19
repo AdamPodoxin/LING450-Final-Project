@@ -1,6 +1,8 @@
 import sys
 import pandas as pd
 import spacy
+from spacy.tokens import Doc
+from concurrent.futures import ThreadPoolExecutor
 
 
 nlp = spacy.load("en_core_web_sm")
@@ -31,26 +33,42 @@ appraisal_categories = {
 }
 
 
+def extract_interview_appraisal_categories_doc(doc: Doc, index: int, word_to_category: dict[str, str]):
+    num_appraisal_words = 0
+    word_counts = {word: 0 for word in word_to_category.keys()}
+
+    for token in doc:
+        if token.lemma_ in word_to_category:
+            word_counts[token.lemma_] += 1
+            num_appraisal_words += 1
+
+    category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) for category in appraisal_categories.keys()}
+
+    ratios = {f"interview_{category}_ratio": category_counts[category] / num_appraisal_words if num_appraisal_words > 0 else 0.0 for category in appraisal_categories.keys()}
+    return index, ratios
+
+
+def add_doc(text: str, index: int, docs: list[Doc]):
+    docs[index] = nlp(text)
+
+
 def extract_interview_appraisal_categories(interviews: pd.Series):
     appraisal_word_ratios = pd.DataFrame(0.0, index=interviews.index, columns=[f"interview_{category}_ratio" for category in appraisal_categories.keys()])
-    
+
+    docs: list[Doc] = [None] * len(interviews)
+
     with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
-        docs = nlp.pipe(interviews)
-    
-    for i, doc in enumerate(docs):
-        num_appraisal_words = 0
-        category_counts = {category: 0 for category in appraisal_categories.keys()}
-        
-        for token in doc:
-            for category, words in appraisal_categories.items():
-                if token.lemma_ in words:
-                    category_counts[category] += 1
-                    num_appraisal_words += 1
-        
-        if num_appraisal_words > 0:
-            for category in appraisal_categories.keys():
-                appraisal_word_ratios.at[i, f"interview_{category}_ratio"] = category_counts[category] / num_appraisal_words
-    
+        docs = list(nlp.pipe(interviews, n_process=-1))
+
+    word_to_category = {word: category for category, words in appraisal_categories.items() for word in words}
+
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(extract_interview_appraisal_categories_doc, doc, i, word_to_category): i for i, doc in enumerate(docs)}
+        for future in futures:
+            index, ratios = future.result()
+            for category, ratio in ratios.items():
+                appraisal_word_ratios.at[index, category] = ratio
+
     return appraisal_word_ratios
 
 
@@ -78,13 +96,7 @@ def main(input_file: str, output_file: str):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 5 and sys.argv[4] == "DEBUG":
-        input_file = sys.argv[2]
-        output_file = sys.argv[3]
-
-        main(input_file, output_file)
-
-    elif len(sys.argv) != 3:
+    if len(sys.argv) != 3:
         print("Usage: python3 pipeline/extract_features.py <input_file> <output_file>")
     
     else:
