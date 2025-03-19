@@ -1,0 +1,36 @@
+import sys
+import pandas as pd
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, accuracy_score
+
+
+result_column = "decision"
+columns_to_ignore = ["ID", result_column]
+
+
+def main(input_file: str):
+    data_with_features = pd.read_csv(input_file)
+
+    X = data_with_features.drop(columns=columns_to_ignore, axis=1)
+    y = data_with_features[result_column]
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    model = GradientBoostingClassifier()
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"Accuracy: {accuracy:2f}")
+    
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python3 pipeline/train_model.py <input_file>")
+    else:
+        input_file = sys.argv[1]
+        main(input_file)
