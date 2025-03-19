@@ -44,7 +44,7 @@ def extract_interview_appraisal_categories_doc(doc: Doc, index: int, word_to_cat
 
     category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) for category in appraisal_categories.keys()}
 
-    ratios = {f"interview_{category}_ratio": category_counts[category] / num_appraisal_words if num_appraisal_words > 0 else 0.0 for category in appraisal_categories.keys()}
+    ratios = {f"interview_{category}_ratio": category_counts[category] / len(doc) for category in appraisal_categories.keys()}
     return index, ratios
 
 
