@@ -31,22 +31,25 @@ appraisal_categories = {
 }
 
 
-def extract_interview_appraisal_categories(interview: str):
-    appraisal_word_ratios = pd.Series({f"interview_{category}_ratio": 0.0 for category in appraisal_categories.keys()})
-
-    num_appraisal_words = 0
-
-    doc = nlp(interview)
-
-    for token in doc:
-        for category, words in appraisal_categories.items():
-            if token.lemma_ in words:
-                appraisal_word_ratios[f"interview_{category}_ratio"] += 1
-                num_appraisal_words += 1
-
-    if num_appraisal_words > 0:
-        for category in appraisal_categories.keys():
-            appraisal_word_ratios[f"interview_{category}_ratio"] /= num_appraisal_words
+def extract_interview_appraisal_categories(interviews: pd.Series):
+    appraisal_word_ratios = pd.DataFrame(0.0, index=interviews.index, columns=[f"interview_{category}_ratio" for category in appraisal_categories.keys()])
+    
+    with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
+        docs = nlp.pipe(interviews)
+    
+    for i, doc in enumerate(docs):
+        num_appraisal_words = 0
+        category_counts = {category: 0 for category in appraisal_categories.keys()}
+        
+        for token in doc:
+            for category, words in appraisal_categories.items():
+                if token.lemma_ in words:
+                    category_counts[category] += 1
+                    num_appraisal_words += 1
+        
+        if num_appraisal_words > 0:
+            for category in appraisal_categories.keys():
+                appraisal_word_ratios.at[i, f"interview_{category}_ratio"] = category_counts[category] / num_appraisal_words
     
     return appraisal_word_ratios
 
@@ -57,7 +60,7 @@ ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision",
 def extract_all_features(data: pd.DataFrame):
     data_with_features = data.copy()
     
-    appraisal_word_ratios = data_with_features["Transcript"].apply(extract_interview_appraisal_categories)
+    appraisal_word_ratios = extract_interview_appraisal_categories(data_with_features["Transcript"])
 
     data_with_features = pd.concat([data_with_features, appraisal_word_ratios], axis=1)
 
