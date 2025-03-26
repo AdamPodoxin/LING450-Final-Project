@@ -33,6 +33,32 @@ appraisal_categories = {
 }
 
 
+# From Biber (2004)
+attitudinal_categories = {
+    "positive": ["amazed", "amazing", "amused", "funny", "glad", "good", 
+                 "grateful", "great", "happy", "hopeful", "wonderful", 
+                 "pleased", "preferable", "reassured", "relieved", "thankful", 
+                 "extraordinary", "incredible", "acceptable", "advisable", 
+                 "appropriate", "encouraged", "silly", "desirable", "fortunate", 
+                 "interesting", "nice", "lucky", "satisfied", "sensible", 
+                 "surprised", "surprising", "neat"],
+    "neutral": ["adamant", "anomalous", "aware", "careful", "conceivable", 
+                "critical", "crucial", "curious", "essential", "fitting", 
+                "imperative", "incidental", "inconceivable", "indisputable", 
+                "ironic", "natural", "necessary", "notable", "noteworthy", 
+                "noticeable", "obligatory", "odd", "okay", "paradoxical", 
+                "peculiar", "ridiculous", "strange", "sufficient", "typical", 
+                "unaware", "understandable", "untypical", "unusual", "vital"],
+    "negative": ["afraid", "alarmed", "angry", "annoyed", "annoying", "concerned", 
+                 "depressed", "upset", "upsetting", "worried", "disappointed", 
+                 "disappointing", "dissatisfied", "distressed", "disturbed", 
+                 "dreadful", "embarrasing", "uncomfortable", "unfair", "unfortunate", 
+                 "unhappy", "unlucky", "awful", "frightened", "frightening", "horrible", 
+                 "hurt", "unacceptable", "unthinkable", "ashtonished", "ashtonishing", "sorry", 
+                 "mad", "stupid", "irritated", "irritating", "sad", "shocked", "shocking", "tragic"],
+}
+
+
 def extract_interview_appraisal_categories_doc(doc: Doc, index: int, word_to_category: dict[str, str]):
     num_appraisal_words = 0
     word_counts = {word: 0 for word in word_to_category.keys()}
@@ -42,7 +68,8 @@ def extract_interview_appraisal_categories_doc(doc: Doc, index: int, word_to_cat
             word_counts[token.lemma_] += 1
             num_appraisal_words += 1
 
-    category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) for category in appraisal_categories.keys()}
+    category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) 
+                       for category in appraisal_categories.keys()}
 
     ratios = {f"interview_{category}_ratio": category_counts[category] / len(doc) for category in appraisal_categories.keys()}
     return index, ratios
@@ -53,7 +80,8 @@ def add_doc(text: str, index: int, docs: list[Doc]):
 
 
 def extract_interview_appraisal_categories(interviews: pd.Series):
-    appraisal_word_ratios = pd.DataFrame(0.0, index=interviews.index, columns=[f"interview_{category}_ratio" for category in appraisal_categories.keys()])
+    appraisal_word_ratios = pd.DataFrame(0.0, index=interviews.index, 
+                                         columns=[f"interview_{category}_ratio" for category in appraisal_categories.keys()])
 
     docs: list[Doc] = [None] * len(interviews)
 
@@ -72,6 +100,43 @@ def extract_interview_appraisal_categories(interviews: pd.Series):
     return appraisal_word_ratios
 
 
+def extract_interview_attitudinal_adjectives_doc(doc: Doc, index: int, word_to_category: dict[str, str]):
+    num_attitudinal_words = 0
+    word_counts = {word: 0 for word in word_to_category.keys()}
+
+    for token in doc:
+        if token.lemma_ in word_to_category:
+            word_counts[token.lemma_] += 1
+            num_attitudinal_words += 1
+
+    category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) 
+                       for category in attitudinal_categories.keys()}
+
+    ratios = {f"interview_attitudinal_{category}_ratio": category_counts[category] / len(doc) for category in attitudinal_categories.keys()}
+    return index, ratios
+
+
+def extract_interview_attitudinal_adjectives(interviews: pd.Series):
+    attitudinal_word_ratios = pd.DataFrame(0.0, index=interviews.index, 
+                                           columns=[f"interview_attitudinal_{category}_ratio" for category in attitudinal_categories.keys()])
+
+    docs: list[Doc] = [None] * len(interviews)
+
+    with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
+        docs = list(nlp.pipe(interviews, n_process=-1))
+
+    word_to_category = {word: category for category, words in attitudinal_categories.items() for word in words}
+
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(extract_interview_attitudinal_adjectives_doc, doc, i, word_to_category): i for i, doc in enumerate(docs)}
+        for future in futures:
+            index, ratios = future.result()
+            for category, ratio in ratios.items():
+                attitudinal_word_ratios.at[index, category] = ratio
+
+    return attitudinal_word_ratios
+
+
 ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision", "Job_Description"]
 
 
@@ -79,8 +144,11 @@ def extract_all_features(data: pd.DataFrame):
     data_with_features = data.copy()
     
     appraisal_word_ratios = extract_interview_appraisal_categories(data_with_features["Transcript"])
+    attitudinal_word_ratios = extract_interview_attitudinal_adjectives(data_with_features["Transcript"])
 
-    data_with_features = pd.concat([data_with_features, appraisal_word_ratios], axis=1)
+    data_with_features = pd.concat([data_with_features, 
+                                    appraisal_word_ratios, 
+                                    attitudinal_word_ratios], axis=1)
 
     data_with_features.drop(columns=ignore_columns, axis=1, inplace=True)
 
