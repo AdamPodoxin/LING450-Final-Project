@@ -7,15 +7,19 @@ def get_honorific(name: str):
     honorifics = ["Mr", "Mrs", "Ms", "Dr", "PhD"]
 
     for honorific in honorifics:
-        if honorific.lower() in name.lower():
+        if f"{honorific.lower()}." in name.lower():
             return honorific
     
     return None
 
 
 def get_name_with_honorifics(name: str, honorific: str):
-    last_name = name.split(" ")[-1]
-    return f"{honorific} {last_name}"
+    if len(name.split(" ")) == 2:
+        # Already in correct form
+        return name
+
+    last_name = name.split(" ")[2]
+    return f"{honorific}. {last_name}"
 
 
 def get_name_line_pattern(name: str, start_only = True):
@@ -65,6 +69,13 @@ def find_interviewer_name(transcript: str):
             return interviewer_name
 
         interviewer_name = "hiring manager"
+        interviewer_name_pattern = get_name_line_pattern(interviewer_name, start_only=False)
+        matches = interviewer_name_pattern.findall(transcript)
+
+        if matches:
+            return interviewer_name
+        
+        interviewer_name = "interviewer"
 
     return interviewer_name
 
@@ -73,10 +84,15 @@ def find_candidate_name(transcript: str, original_name: str):
     candidate_name = original_name
 
     if len(candidate_name.split(" ")) > 2:
-        matches = re.findall(rf"\b{candidate_name}\b", transcript, re.IGNORECASE)
+        # find honorific at the beginning of the name
+        honorific = get_honorific(candidate_name)
+        if honorific and candidate_name.lower().startswith(honorific.lower()):
+            candidate_name = get_name_with_honorifics(candidate_name, honorific)
+        else:
+            matches = re.findall(rf"\b{candidate_name}\b", transcript, re.IGNORECASE)
 
-        if len(matches) <= 1:
-            candidate_name = " ".join(candidate_name.split(" ")[:2])
+            if len(matches) <= 1:
+                candidate_name = " ".join(candidate_name.split(" ")[:2])
 
     candidate_name_pattern = get_name_line_pattern(candidate_name, start_only=False)
     matches = candidate_name_pattern.findall(transcript)
@@ -91,8 +107,15 @@ def find_candidate_name(transcript: str, original_name: str):
 
     if matches:
         return first_name
-    else:
-        candidate_name = "candidate"
+    
+    candidate_name = "candidate"
+    candidate_name_pattern = get_name_line_pattern(candidate_name, start_only=False)
+    matches = candidate_name_pattern.findall(transcript)
+
+    if matches:
+        return candidate_name
+
+    candidate_name = original_name
 
     return candidate_name
 
@@ -105,8 +128,10 @@ def clean_transcript(data: pd.Series):
         lines = [line.strip() for line in lines if line.strip()]
         lines = [line.replace("\n", " ") for line in lines]
 
-        interviewer_name = find_interviewer_name(transcript).lower()
-        candidate_name: str = find_candidate_name(transcript, data["Name"])
+        lines_joined = "\n".join(lines)
+
+        interviewer_name = find_interviewer_name(lines_joined).lower()
+        candidate_name: str = find_candidate_name(lines_joined, data["Name"])
         candidate_name = candidate_name.lower()
 
         interviewer_lines: list[str] = []
