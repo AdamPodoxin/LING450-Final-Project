@@ -123,8 +123,6 @@ def separate_interviewer_and_candidate_transcripts(transcript: str):
 def extract_interview_appraisal_categories(data: pd.DataFrame):
     interviews = data["Transcript"]
 
-    appraisal_word_ratios = pd.DataFrame(0.0, index=interviews.index, 
-                                         columns=[f"interview_{category}_ratio" for category in appraisal_categories.keys()])
     appraisal_word_ratios_interviewer = pd.DataFrame(0.0, index=interviews.index, 
                                          columns=[f"interview_interviewer_{category}_ratio" for category in appraisal_categories.keys()])
     appraisal_word_ratios_candidate = pd.DataFrame(0.0, index=interviews.index,
@@ -139,7 +137,6 @@ def extract_interview_appraisal_categories(data: pd.DataFrame):
 
         for _, row in data.iterrows():
             interview: str = row["Transcript"]
-            candidate_name: str = row["Name"]
 
             interviewer_transcript, candidate_transcript = separate_interviewer_and_candidate_transcripts(interview)
 
@@ -152,7 +149,7 @@ def extract_interview_appraisal_categories(data: pd.DataFrame):
     word_to_category_interviewer = {word: category for category, words in appraisal_categories.items() for word in words}
     word_to_category_candidate = {word: category for category, words in appraisal_categories.items() for word in words}
 
-    with ThreadPoolExecutor(1000) as executor:
+    with ThreadPoolExecutor(5000) as executor:
         futures_interviewer = {executor.submit(extract_interview_appraisal_categories_doc, doc, i, "interviewer", word_to_category_interviewer): 
                                i for i, doc in enumerate(interviewer_docs)}
         for future in futures_interviewer:
