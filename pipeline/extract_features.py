@@ -3,6 +3,7 @@ import pandas as pd
 import spacy
 from spacy.tokens import Doc
 from concurrent.futures import ThreadPoolExecutor
+import re
 
 
 nlp = spacy.load("en_core_web_sm")
@@ -59,7 +60,7 @@ attitudinal_categories = {
 }
 
 
-def extract_interview_appraisal_categories_doc(doc: Doc, index: int, word_to_category: dict[str, str]):
+def extract_interview_appraisal_categories_doc(doc: Doc, index: int, prefix: str, word_to_category: dict[str, str]):
     num_appraisal_words = 0
     word_counts = {word: 0 for word in word_to_category.keys()}
 
@@ -71,7 +72,7 @@ def extract_interview_appraisal_categories_doc(doc: Doc, index: int, word_to_cat
     category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) 
                        for category in appraisal_categories.keys()}
 
-    ratios = {f"interview_{category}_ratio": category_counts[category] / len(doc) for category in appraisal_categories.keys()}
+    ratios = {f"interview_{prefix}_{category}_ratio": category_counts[category] / len(doc) for category in appraisal_categories.keys()}
     return index, ratios
 
 
@@ -79,23 +80,96 @@ def add_doc(text: str, index: int, docs: list[Doc]):
     docs[index] = nlp(text)
 
 
-def extract_interview_appraisal_categories(interviews: pd.Series):
+transcript_speech_pattern = re.compile(r"^(.*?):(.*)$")
+
+
+def separate_interviewer_and_candidate_transcripts(transcript: str):
+    lines = transcript.split("\n\n")
+    lines = [line.strip() for line in lines if line.strip()]
+    lines = [line.replace("\n", " ") for line in lines]
+
+    interviewer_lines: list[str] = []
+    candidate_lines: list[str] = []
+
+    for line in lines:
+        match = transcript_speech_pattern.match(line)
+
+        if match:
+            groups = match.groups()
+
+            if len(groups) != 2:
+                continue
+
+            speaker = groups[0]
+            speech = groups[1]
+            
+            if speaker == "Interviewer":
+                interviewer_lines.append(speech)
+            elif speaker.startswith("Interview"):
+                continue
+            else:
+                candidate_lines.append(speech)
+
+    interviewer_transcript = "\n".join(interviewer_lines)
+    candidate_transcript = "\n".join(candidate_lines)
+
+    return interviewer_transcript, candidate_transcript
+
+
+def extract_interview_appraisal_categories(data: pd.DataFrame):
+    interviews = data["Transcript"]
+
     appraisal_word_ratios = pd.DataFrame(0.0, index=interviews.index, 
                                          columns=[f"interview_{category}_ratio" for category in appraisal_categories.keys()])
+    appraisal_word_ratios_interviewer = pd.DataFrame(0.0, index=interviews.index, 
+                                         columns=[f"interview_interviewer_{category}_ratio" for category in appraisal_categories.keys()])
+    appraisal_word_ratios_candidate = pd.DataFrame(0.0, index=interviews.index,
+                                            columns=[f"interview_candidate_{category}_ratio" for category in appraisal_categories.keys()])
 
-    docs: list[Doc] = [None] * len(interviews)
+    interviewer_docs: list[Doc] = [None] * len(interviews)
+    candidate_docs: list[Doc] = [None] * len(interviews)
 
     with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
-        docs = list(nlp.pipe(interviews, n_process=-1))
+        interviewer_transcripts: list[str] = []
+        candidate_transcripts: list[str] = []
 
-    word_to_category = {word: category for category, words in appraisal_categories.items() for word in words}
+        for _, row in data.iterrows():
+            interview: str = row["Transcript"]
+            candidate_name: str = row["Name"]
+
+            interviewer_transcript, candidate_transcript = separate_interviewer_and_candidate_transcripts(interview)
+
+            interviewer_transcripts.append(interviewer_transcript)
+            candidate_transcripts.append(candidate_transcript)
+
+            # check if the transcripts are empty or whitespace
+            if not interviewer_transcript.strip():
+                raise ValueError(f"ERROR!!! Empty transcript found for interviwer: {candidate_name}")
+            if not candidate_transcript.strip():
+                raise ValueError(f"ERROR!!! Empty transcript found for candidate: {candidate_name}")
+
+        interviewer_docs = list(nlp.pipe(interviewer_transcripts, n_process=-1))
+        candidate_docs = list(nlp.pipe(candidate_transcripts, n_process=-1))
+
+    word_to_category_interviewer = {word: category for category, words in appraisal_categories.items() for word in words}
+    word_to_category_candidate = {word: category for category, words in appraisal_categories.items() for word in words}
 
     with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(extract_interview_appraisal_categories_doc, doc, i, word_to_category): i for i, doc in enumerate(docs)}
-        for future in futures:
+        futures_interviewer = {executor.submit(extract_interview_appraisal_categories_doc, doc, i, "interviewer", word_to_category_interviewer): 
+                               i for i, doc in enumerate(interviewer_docs)}
+        for future in futures_interviewer:
             index, ratios = future.result()
             for category, ratio in ratios.items():
-                appraisal_word_ratios.at[index, category] = ratio
+                appraisal_word_ratios_interviewer.at[index, category] = ratio
+
+        futures_candidate = {executor.submit(extract_interview_appraisal_categories_doc, doc, i, "candidate", word_to_category_candidate):
+                                 i for i, doc in enumerate(candidate_docs)}
+        for future in futures_candidate:
+            index, ratios = future.result()
+            for category, ratio in ratios.items():
+                appraisal_word_ratios_candidate.at[index, category] = ratio
+
+        appraisal_word_ratios = pd.concat([appraisal_word_ratios_interviewer, appraisal_word_ratios_candidate], axis=1)
 
     return appraisal_word_ratios
 
@@ -143,7 +217,7 @@ ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision",
 def extract_all_features(data: pd.DataFrame):
     data_with_features = data.copy()
     
-    appraisal_word_ratios = extract_interview_appraisal_categories(data_with_features["Transcript"])
+    appraisal_word_ratios = extract_interview_appraisal_categories(data_with_features)
     attitudinal_word_ratios = extract_interview_attitudinal_adjectives(data_with_features["Transcript"])
 
     data_with_features = pd.concat([data_with_features, 
