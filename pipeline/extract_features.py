@@ -72,7 +72,11 @@ def extract_interview_appraisal_categories_doc(doc: Doc, index: int, prefix: str
     category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) 
                        for category in appraisal_categories.keys()}
 
-    ratios = {f"interview_{prefix}_{category}_ratio": category_counts[category] / len(doc) for category in appraisal_categories.keys()}
+    if len(doc) == 0:
+        ratios = {f"interview_{prefix}_{category}_ratio": 0 for category in appraisal_categories.keys()}
+    else:
+        ratios = {f"interview_{prefix}_{category}_ratio": category_counts[category] / len(doc) for category in appraisal_categories.keys()}
+    
     return index, ratios
 
 
@@ -91,7 +95,7 @@ def separate_interviewer_and_candidate_transcripts(transcript: str):
     interviewer_lines: list[str] = []
     candidate_lines: list[str] = []
 
-    for line in lines:
+    for i, line in enumerate(lines):
         match = transcript_speech_pattern.match(line)
 
         if match:
@@ -103,12 +107,12 @@ def separate_interviewer_and_candidate_transcripts(transcript: str):
             speaker = groups[0]
             speech = groups[1]
             
-            if speaker == "Interviewer":
+            if speaker == "INTERVIEWER":
                 interviewer_lines.append(speech)
-            elif speaker.startswith("Interview"):
-                continue
-            else:
+            elif speaker == "CANDIDATE":
                 candidate_lines.append(speech)
+            else:
+                print("Invalid transcript found at", i)
 
     interviewer_transcript = "\n".join(interviewer_lines)
     candidate_transcript = "\n".join(candidate_lines)
@@ -142,19 +146,13 @@ def extract_interview_appraisal_categories(data: pd.DataFrame):
             interviewer_transcripts.append(interviewer_transcript)
             candidate_transcripts.append(candidate_transcript)
 
-            # check if the transcripts are empty or whitespace
-            if not interviewer_transcript.strip():
-                raise ValueError(f"ERROR!!! Empty transcript found for interviwer: {candidate_name}")
-            if not candidate_transcript.strip():
-                raise ValueError(f"ERROR!!! Empty transcript found for candidate: {candidate_name}")
-
         interviewer_docs = list(nlp.pipe(interviewer_transcripts, n_process=-1))
         candidate_docs = list(nlp.pipe(candidate_transcripts, n_process=-1))
 
     word_to_category_interviewer = {word: category for category, words in appraisal_categories.items() for word in words}
     word_to_category_candidate = {word: category for category, words in appraisal_categories.items() for word in words}
 
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(1000) as executor:
         futures_interviewer = {executor.submit(extract_interview_appraisal_categories_doc, doc, i, "interviewer", word_to_category_interviewer): 
                                i for i, doc in enumerate(interviewer_docs)}
         for future in futures_interviewer:
