@@ -120,6 +120,9 @@ def separate_interviewer_and_candidate_transcripts(transcript: str):
     return interviewer_transcript, candidate_transcript
 
 
+num_workers = 1500
+
+
 def extract_interview_appraisal_categories(data: pd.DataFrame):
     interviews = data["Transcript"]
 
@@ -149,7 +152,7 @@ def extract_interview_appraisal_categories(data: pd.DataFrame):
     word_to_category_interviewer = {word: category for category, words in appraisal_categories.items() for word in words}
     word_to_category_candidate = {word: category for category, words in appraisal_categories.items() for word in words}
 
-    with ThreadPoolExecutor(5000) as executor:
+    with ThreadPoolExecutor(num_workers) as executor:
         futures_interviewer = {executor.submit(extract_interview_appraisal_categories_doc, doc, i, "interviewer", word_to_category_interviewer): 
                                i for i, doc in enumerate(interviewer_docs)}
         for future in futures_interviewer:
@@ -164,7 +167,7 @@ def extract_interview_appraisal_categories(data: pd.DataFrame):
             for category, ratio in ratios.items():
                 appraisal_word_ratios_candidate.at[index, category] = ratio
 
-        appraisal_word_ratios = pd.concat([appraisal_word_ratios_interviewer, appraisal_word_ratios_candidate], axis=1)
+    appraisal_word_ratios = pd.concat([appraisal_word_ratios_interviewer, appraisal_word_ratios_candidate], axis=1)
 
     return appraisal_word_ratios
 
