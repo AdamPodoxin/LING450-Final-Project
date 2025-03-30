@@ -120,7 +120,7 @@ def separate_interviewer_and_candidate_transcripts(transcript: str):
     return interviewer_transcript, candidate_transcript
 
 
-num_workers = 1500
+num_workers = 500
 
 
 def extract_interview_appraisal_categories(data: pd.DataFrame):
@@ -189,6 +189,7 @@ def extract_interview_attitudinal_adjectives_doc(doc: Doc, index: int, word_to_c
 
 
 def extract_interview_attitudinal_adjectives(interviews: pd.Series):
+    # TODO: try to implement working version that separately analyzes interviewer and candidate
     attitudinal_word_ratios = pd.DataFrame(0.0, index=interviews.index, 
                                            columns=[f"interview_attitudinal_{category}_ratio" for category in attitudinal_categories.keys()])
 
