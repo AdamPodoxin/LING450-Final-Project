@@ -47,7 +47,7 @@ To do this on the (cleaned) data, run the command
 python3 pipeline/extract_features.py <input_file> <output_file>
 ```
 
-The input file is a csv containing the interview transcripts (e.g. `data/dataset.csv`) and the output file will contain all the features we use for training the model.
+The input file is a csv containing the interview transcripts (e.g. `data/dataset_cleaned.csv_`) and the output file will contain all the features we use for training the model.
 
 ## Train the model
 
