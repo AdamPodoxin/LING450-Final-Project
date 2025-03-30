@@ -1,36 +1,78 @@
 import sys
+import time
 import pandas as pd
 import spacy
 from spacy.tokens import Doc
-from concurrent.futures import ThreadPoolExecutor
 
 
 nlp = spacy.load("en_core_web_sm")
 
 
-# From Asher et al. (2009)
-appraisal_categories = {
-    "inform": ["inform", "notify", "explain"],
-    "assert": ["assert", "claim", "insist"],
-    "tell": ["say", "announce", "report"],
-    "remark": ["comment", "observe", "remark"],
-    "think": ["think", "reckon", "consider"],
-    "guess": ["presume", "suspect", "wonder"],
-    "blame": ["blame", "criticize", "condemn"],
-    "praise": ["praise", "agree", "approve"],
-    "appreciation": ["good", "shameful", "brilliant"],
-    "recommend": ["advise", "argue for"],
-    "suggest": ["suggest", "propose"],
-    "hope": ["wish", "hope"],
-    "anger_calmdown": ["irritation", "anger"],
-    "astonishment": ["astound", "daze"],
-    "love_fascinate": ["fascinate", "captivate"],
-    "hate_disappoint": ["demoralize", "disgust"],
-    "fear": ["fear", "frighten", "alarm"],
-    "offense": ["hurt", "chock"],
-    "sadness_joy": ["happy", "sad"],
-    "bore_entertain": ["bore", "distraction"]
-}
+def separate_interviewer_and_candidate_transcripts(row: pd.Series):
+    transcript: str = row["Transcript"]
+
+    lines = transcript.split("\n")
+    interviewer_lines = [line for line in lines if line.startswith("INTERVIEWER:")]
+    candidate_lines = [line for line in lines if line.startswith("CANDIDATE:")]
+
+    full_transcript = "\n".join([line.split(": ")[1] for line in lines])
+    interviewer_transcript = "\n".join([line.split(": ")[1] for line in interviewer_lines])
+    candidate_transcript = "\n".join([line.split(": ")[1] for line in candidate_lines])
+
+    result_dict = {
+        "full_transcript": full_transcript, 
+        "interviewer_transcript": interviewer_transcript, 
+        "candidate_transcript": candidate_transcript
+    }
+
+    return pd.Series(data=result_dict)
+
+
+def get_transcript_docs(transcripts: pd.Series):
+    with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
+        docs = list(nlp.pipe(transcripts, n_process=4))
+        
+    return docs
+
+
+def get_data_with_transcript_docs(data: pd.DataFrame):
+    separated_transcripts = data.apply(separate_interviewer_and_candidate_transcripts, axis=1)
+
+    full_transcript_docs = get_transcript_docs(separated_transcripts["full_transcript"])
+    interviewer_transcript_docs = get_transcript_docs(separated_transcripts["interviewer_transcript"])
+    candidate_transcript_docs = get_transcript_docs(separated_transcripts["candidate_transcript"])
+
+    transcript_docs_dict = {
+        "full_transcript_doc": full_transcript_docs,
+        "interviewer_transcript_doc": interviewer_transcript_docs,
+        "candidate_transcript_doc": candidate_transcript_docs,
+    }
+
+    transcript_docs_df = pd.DataFrame(data=transcript_docs_dict)
+
+    return pd.concat([data, transcript_docs_df], axis=1)
+
+
+def get_word_category_ratios(doc: Doc, categories: dict[str, list[str]]):
+    word_to_category = {word: category 
+                for category, words in categories.items() 
+                for word in words}
+
+    word_counts = {word: 0 for word in word_to_category.keys()}
+    
+    for token in doc:
+        if token.lemma_ in word_to_category:
+            word_counts[token.lemma_] += 1
+    
+    category_counts = {category: sum([word_counts[word] 
+                                      for word, cat in word_to_category.items() 
+                                      if cat == category]) 
+                                      for category in categories.keys()}
+    
+    ratios = {f"{category}_ratio": category_counts[category] / len(doc) 
+              for category in categories.keys()}
+    
+    return ratios
 
 
 # From Biber (2004)
@@ -59,96 +101,84 @@ attitudinal_categories = {
 }
 
 
-def extract_interview_appraisal_categories_doc(doc: Doc, index: int, word_to_category: dict[str, str]):
-    num_appraisal_words = 0
-    word_counts = {word: 0 for word in word_to_category.keys()}
-
-    for token in doc:
-        if token.lemma_ in word_to_category:
-            word_counts[token.lemma_] += 1
-            num_appraisal_words += 1
-
-    category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) 
-                       for category in appraisal_categories.keys()}
-
-    ratios = {f"interview_{category}_ratio": category_counts[category] / len(doc) for category in appraisal_categories.keys()}
-    return index, ratios
+def get_attitudinal_ratios(doc: Doc):
+    ratios = get_word_category_ratios(doc, attitudinal_categories)
+    ratios = {f"attitudinal_{column}": value for column, value in ratios.items()}
+    return pd.Series(ratios)
 
 
-def add_doc(text: str, index: int, docs: list[Doc]):
-    docs[index] = nlp(text)
+# From Asher et al. (2009)
+appraisal_categories = {
+    "inform": ["inform", "notify", "explain"],
+    "assert": ["assert", "claim", "insist"],
+    "tell": ["say", "announce", "report"],
+    "remark": ["comment", "observe", "remark"],
+    "think": ["think", "reckon", "consider"],
+    "guess": ["presume", "suspect", "wonder"],
+    "blame": ["blame", "criticize", "condemn"],
+    "praise": ["praise", "agree", "approve"],
+    "appreciation": ["good", "shameful", "brilliant"],
+    "recommend": ["advise", "argue for"],
+    "suggest": ["suggest", "propose"],
+    "hope": ["wish", "hope"],
+    "anger_calmdown": ["irritation", "anger"],
+    "astonishment": ["astound", "daze"],
+    "love_fascinate": ["fascinate", "captivate"],
+    "hate_disappoint": ["demoralize", "disgust"],
+    "fear": ["fear", "frighten", "alarm"],
+    "offense": ["hurt", "chock"],
+    "sadness_joy": ["happy", "sad"],
+    "bore_entertain": ["bore", "distraction"]
+}
 
 
-def extract_interview_appraisal_categories(interviews: pd.Series):
-    appraisal_word_ratios = pd.DataFrame(0.0, index=interviews.index, 
-                                         columns=[f"interview_{category}_ratio" for category in appraisal_categories.keys()])
-
-    docs: list[Doc] = [None] * len(interviews)
-
-    with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
-        docs = list(nlp.pipe(interviews, n_process=-1))
-
-    word_to_category = {word: category for category, words in appraisal_categories.items() for word in words}
-
-    with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(extract_interview_appraisal_categories_doc, doc, i, word_to_category): i for i, doc in enumerate(docs)}
-        for future in futures:
-            index, ratios = future.result()
-            for category, ratio in ratios.items():
-                appraisal_word_ratios.at[index, category] = ratio
-
-    return appraisal_word_ratios
+def get_appraisal_ratios(doc: Doc):
+    ratios = get_word_category_ratios(doc, appraisal_categories)
+    ratios = {f"appraisal_{column}": value for column, value in ratios.items()}
+    return pd.Series(ratios)
 
 
-def extract_interview_attitudinal_adjectives_doc(doc: Doc, index: int, word_to_category: dict[str, str]):
-    num_attitudinal_words = 0
-    word_counts = {word: 0 for word in word_to_category.keys()}
-
-    for token in doc:
-        if token.lemma_ in word_to_category:
-            word_counts[token.lemma_] += 1
-            num_attitudinal_words += 1
-
-    category_counts = {category: sum([word_counts[word] for word, cat in word_to_category.items() if cat == category]) 
-                       for category in attitudinal_categories.keys()}
-
-    ratios = {f"interview_attitudinal_{category}_ratio": category_counts[category] / len(doc) for category in attitudinal_categories.keys()}
-    return index, ratios
-
-
-def extract_interview_attitudinal_adjectives(interviews: pd.Series):
-    attitudinal_word_ratios = pd.DataFrame(0.0, index=interviews.index, 
-                                           columns=[f"interview_attitudinal_{category}_ratio" for category in attitudinal_categories.keys()])
-
-    docs: list[Doc] = [None] * len(interviews)
-
-    with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
-        docs = list(nlp.pipe(interviews, n_process=-1))
-
-    word_to_category = {word: category for category, words in attitudinal_categories.items() for word in words}
-
-    with ThreadPoolExecutor() as executor:
-        futures = {executor.submit(extract_interview_attitudinal_adjectives_doc, doc, i, word_to_category): i for i, doc in enumerate(docs)}
-        for future in futures:
-            index, ratios = future.result()
-            for category, ratio in ratios.items():
-                attitudinal_word_ratios.at[index, category] = ratio
-
-    return attitudinal_word_ratios
+def get_ratios_with_renamed_columns(ratios_df: pd.DataFrame, prefix: str):
+    renamed_columns = {column: f"{prefix}_{column}" for column in ratios_df.columns}
+    return ratios_df.rename(columns=renamed_columns)
 
 
 ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision", "Job_Description"]
 
 
 def extract_all_features(data: pd.DataFrame):
-    data_with_features = data.copy()
-    
-    appraisal_word_ratios = extract_interview_appraisal_categories(data_with_features["Transcript"])
-    attitudinal_word_ratios = extract_interview_attitudinal_adjectives(data_with_features["Transcript"])
+    print("Processing transcripts...")
 
-    data_with_features = pd.concat([data_with_features, 
-                                    appraisal_word_ratios, 
-                                    attitudinal_word_ratios], axis=1)
+    data_with_transcript_docs = get_data_with_transcript_docs(data)
+
+
+    print("Getting appraisal category ratios...")
+
+    interviewer_appraisal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_appraisal_ratios)
+    interviewer_appraisal_ratios = get_ratios_with_renamed_columns(interviewer_appraisal_ratios, "interviewer")
+
+    candidate_appraisal_ratios = data_with_transcript_docs["candidate_transcript_doc"].apply(get_appraisal_ratios)
+    candidate_appraisal_ratios = get_ratios_with_renamed_columns(candidate_appraisal_ratios, "candidate")
+
+
+    print("Getting attitudinal adjective ratios...")
+    
+    interviewer_attitudinal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_attitudinal_ratios)
+    interviewer_attitudinal_ratios = get_ratios_with_renamed_columns(interviewer_attitudinal_ratios, "interviewer")
+
+    candidate_attitudinal_ratios = data_with_transcript_docs["candidate_transcript_doc"].apply(get_attitudinal_ratios)
+    candidate_attitudinal_ratios = get_ratios_with_renamed_columns(candidate_attitudinal_ratios, "candidate")
+
+
+    print("Cleaning up...")
+
+    data_with_features = pd.concat([
+        data, 
+        interviewer_appraisal_ratios,
+        candidate_appraisal_ratios,
+        interviewer_attitudinal_ratios, 
+        candidate_attitudinal_ratios,
+    ], axis=1)
 
     data_with_features.drop(columns=ignore_columns, axis=1, inplace=True)
 
@@ -156,10 +186,15 @@ def extract_all_features(data: pd.DataFrame):
 
 
 def main(input_file: str, output_file: str):
+    print("Reading from", input_file)
     data = pd.read_csv(input_file)
 
+    print("Extracting features...")
+    start_time = time.time()
     data_with_features = extract_all_features(data)
 
+    end_time = time.time()
+    print("Done in", end_time - start_time, "seconds. Saving to", output_file)
     data_with_features.to_csv(output_file, index=False)
 
 
