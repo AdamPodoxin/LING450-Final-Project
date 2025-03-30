@@ -16,9 +16,32 @@ Packages:
 
 # Pipeline
 
+## Clean data
+
+The transcripts found in `data/dataset.csv` vary wildly in format. We need to clean them up so it's easier to extract features from them.
+Specifically, we want to remove any header/footer metadata from the transcripts, and standardize the interviewer and candidate lines.
+To do this, run the command
+
+```bash
+python3 pipeline/clean_data.py <input_file> <output_file>
+```
+
+This will format the transcripts like so:
+
+```
+INTERVIEWER: says something...
+CANDIDATE: says something...
+INTERVIEWER: says something...
+CANDIDATE: says something...
+```
+
+Note that although there are many different rules we built in for properly extracting the intreviewer and candidate speech, there are some cases where we were not able to do this for a small number of transcripts.
+The number of removed transcripts is printed to the command line when the script finishes.
+
 ## Extract features
 
-We extract features relevant to appraisal analysis. To do this on the data, run the command
+We extract features relevant to appraisal analysis.
+To do this on the (cleaned) data, run the command
 
 ```bash
 python3 pipeline/extract_features.py <input_file> <output_file>
