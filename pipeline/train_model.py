@@ -9,11 +9,9 @@ result_column = "decision"
 columns_to_ignore = ["ID", result_column]
 
 
-def main(input_file: str):
-    data_with_features = pd.read_csv(input_file)
-
-    X = data_with_features.drop(columns=columns_to_ignore, axis=1)
-    y = data_with_features[result_column]
+def train_model(data: pd.DataFrame):
+    X = data.drop(columns=columns_to_ignore, axis=1)
+    y = data[result_column]
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -34,6 +32,11 @@ def main(input_file: str):
     
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
+
+
+def main(input_file: str):
+    data_with_features = pd.read_csv(input_file)
+    train_model(data_with_features)
 
 
 if __name__ == "__main__":

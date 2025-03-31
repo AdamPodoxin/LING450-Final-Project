@@ -186,6 +186,9 @@ def extract_all_features(data: pd.DataFrame):
 
     print("Getting appraisal category ratios...")
 
+    full_appraisal_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_appraisal_ratios)
+    full_appraisal_ratios = get_ratios_with_renamed_columns(full_appraisal_ratios, "full")
+
     interviewer_appraisal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_appraisal_ratios)
     interviewer_appraisal_ratios = get_ratios_with_renamed_columns(interviewer_appraisal_ratios, "interviewer")
 
@@ -194,6 +197,9 @@ def extract_all_features(data: pd.DataFrame):
 
 
     print("Getting attitudinal adjective ratios...")
+    
+    full_attitudinal_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_attitudinal_ratios)
+    full_attitudinal_ratios = get_ratios_with_renamed_columns(full_attitudinal_ratios, "full")
     
     interviewer_attitudinal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_attitudinal_ratios)
     interviewer_attitudinal_ratios = get_ratios_with_renamed_columns(interviewer_attitudinal_ratios, "interviewer")
@@ -210,10 +216,12 @@ def extract_all_features(data: pd.DataFrame):
     print("Cleaning up...")
 
     data_with_features = pd.concat([
-        data, 
+        data,
+        full_appraisal_ratios,
         interviewer_appraisal_ratios,
         candidate_appraisal_ratios,
-        interviewer_attitudinal_ratios, 
+        full_attitudinal_ratios,
+        interviewer_attitudinal_ratios,
         candidate_attitudinal_ratios,
         sentiment_stats
     ], axis=1)
