@@ -1,8 +1,10 @@
 import sys
 import time
+import numpy as np
 import pandas as pd
 import spacy
 from spacy.tokens import Doc
+from textblob import TextBlob
 
 
 nlp = spacy.load("en_core_web_sm")
@@ -143,6 +145,36 @@ def get_ratios_with_renamed_columns(ratios_df: pd.DataFrame, prefix: str):
     return ratios_df.rename(columns=renamed_columns)
 
 
+def get_sentiment_stats(row: pd.Series):
+    full_transcript_doc: Doc = row["full_transcript_doc"]
+    interviewer_transcript_doc: Doc = row["interviewer_transcript_doc"]
+    candidate_transcript_doc: Doc = row["candidate_transcript_doc"]
+
+    full_transcript_blob = TextBlob(full_transcript_doc.text)
+    interviewer_transcript_blob = TextBlob(interviewer_transcript_doc.text)
+    candidate_transcript_blob = TextBlob(candidate_transcript_doc.text)
+
+    return pd.Series(data={
+        "overall_full_sentiment": full_transcript_blob.sentiment.polarity,
+        "overall_interviewer_sentiment": interviewer_transcript_blob.sentiment.polarity,
+        "overall_candidate_sentiment": candidate_transcript_blob.sentiment.polarity,
+        
+        "full_sentiment_trend": 
+            full_transcript_blob.sentences[-1].sentiment.polarity - full_transcript_blob.sentences[0].sentiment.polarity,
+        "interviewer_sentiment_trend": 
+            interviewer_transcript_blob.sentences[-1].sentiment.polarity - interviewer_transcript_blob.sentences[0].sentiment.polarity,
+        "candidate_sentiment_trend": 
+            candidate_transcript_blob.sentences[-1].sentiment.polarity - candidate_transcript_blob.sentences[0].sentiment.polarity,
+        
+        "full_sentiment_variability": 
+            np.std([sentence.sentiment.polarity for sentence in full_transcript_blob.sentences]),
+        "interviewer_sentiment_variability": 
+            np.std([sentence.sentiment.polarity for sentence in interviewer_transcript_blob.sentences]),
+        "candidate_sentiment_variability": 
+            np.std([sentence.sentiment.polarity for sentence in candidate_transcript_blob.sentences]),
+    })
+
+
 ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision", "Job_Description"]
 
 
@@ -170,6 +202,11 @@ def extract_all_features(data: pd.DataFrame):
     candidate_attitudinal_ratios = get_ratios_with_renamed_columns(candidate_attitudinal_ratios, "candidate")
 
 
+    print("Getting sentiment statistics...")
+
+    sentiment_stats = data_with_transcript_docs.apply(get_sentiment_stats, axis=1)
+
+
     print("Cleaning up...")
 
     data_with_features = pd.concat([
@@ -178,6 +215,7 @@ def extract_all_features(data: pd.DataFrame):
         candidate_appraisal_ratios,
         interviewer_attitudinal_ratios, 
         candidate_attitudinal_ratios,
+        sentiment_stats
     ], axis=1)
 
     data_with_features.drop(columns=ignore_columns, axis=1, inplace=True)
