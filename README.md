@@ -10,8 +10,10 @@ Python 3.12 is recommended.
 
 Packages:
 
+- `numpy`
 - `pandas`
 - `spacy`
+- `textblob`
 - `sklearn`
 
 # Pipeline
