@@ -5,6 +5,7 @@ import pandas as pd
 import spacy
 from spacy.tokens import Doc
 from textblob import TextBlob
+from multiprocessing import Pool, cpu_count
 
 
 nlp = spacy.load("en_core_web_sm")
@@ -145,7 +146,7 @@ def get_ratios_with_renamed_columns(ratios_df: pd.DataFrame, prefix: str):
     return ratios_df.rename(columns=renamed_columns)
 
 
-def get_sentiment_stats(row: pd.Series):
+def get_sentiment_stats_row(row: pd.Series):
     full_transcript_doc: Doc = row["full_transcript_doc"]
     interviewer_transcript_doc: Doc = row["interviewer_transcript_doc"]
     candidate_transcript_doc: Doc = row["candidate_transcript_doc"]
@@ -175,6 +176,26 @@ def get_sentiment_stats(row: pd.Series):
     })
 
 
+def get_sentiment_stats_chunk(rows: list[list[pd.Series]]):
+    return [get_sentiment_stats_row(row) for row in rows]
+
+
+def get_sentiment_stats(data: pd.DataFrame):
+    num_chunks = cpu_count()
+    chunk_size = int(np.ceil(len(data) / num_chunks))
+    sentiment_stats_list = []
+
+    with Pool(num_chunks) as pool:
+        chunks = [
+            [row for _, row in data.iloc[i:i + chunk_size].iterrows()]
+            for i in range(0, len(data), chunk_size)
+        ]
+        sentiment_stats_list = pool.map(get_sentiment_stats_chunk, chunks)
+
+    sentiment_stats = pd.DataFrame([item for sublist in sentiment_stats_list for item in sublist])
+    return sentiment_stats
+
+
 ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision", "Job_Description"]
 
 
@@ -186,6 +207,9 @@ def extract_all_features(data: pd.DataFrame):
 
     print("Getting appraisal category ratios...")
 
+    full_appraisal_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_appraisal_ratios)
+    full_appraisal_ratios = get_ratios_with_renamed_columns(full_appraisal_ratios, "full")
+
     interviewer_appraisal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_appraisal_ratios)
     interviewer_appraisal_ratios = get_ratios_with_renamed_columns(interviewer_appraisal_ratios, "interviewer")
 
@@ -194,6 +218,9 @@ def extract_all_features(data: pd.DataFrame):
 
 
     print("Getting attitudinal adjective ratios...")
+    
+    full_attitudinal_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_attitudinal_ratios)
+    full_attitudinal_ratios = get_ratios_with_renamed_columns(full_attitudinal_ratios, "full")
     
     interviewer_attitudinal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_attitudinal_ratios)
     interviewer_attitudinal_ratios = get_ratios_with_renamed_columns(interviewer_attitudinal_ratios, "interviewer")
@@ -204,16 +231,17 @@ def extract_all_features(data: pd.DataFrame):
 
     print("Getting sentiment statistics...")
 
-    sentiment_stats = data_with_transcript_docs.apply(get_sentiment_stats, axis=1)
-
+    sentiment_stats = get_sentiment_stats(data_with_transcript_docs)
 
     print("Cleaning up...")
 
     data_with_features = pd.concat([
-        data, 
+        data,
+        full_appraisal_ratios,
         interviewer_appraisal_ratios,
         candidate_appraisal_ratios,
-        interviewer_attitudinal_ratios, 
+        full_attitudinal_ratios,
+        interviewer_attitudinal_ratios,
         candidate_attitudinal_ratios,
         sentiment_stats
     ], axis=1)
