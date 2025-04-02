@@ -1,14 +1,20 @@
 import sys
 import time
+from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
 import spacy
 from spacy.tokens import Doc
 from textblob import TextBlob
-from multiprocessing import Pool, cpu_count
+from senticnet.senticnet import SenticNet
 
 
 nlp = spacy.load("en_core_web_sm")
+
+
+sentic = SenticNet()
+
+num_processes_to_use = cpu_count() // 2
 
 
 def separate_interviewer_and_candidate_transcripts(row: pd.Series):
@@ -33,7 +39,7 @@ def separate_interviewer_and_candidate_transcripts(row: pd.Series):
 
 def get_transcript_docs(transcripts: pd.Series):
     with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
-        docs = list(nlp.pipe(transcripts, n_process=4))
+        docs = list(nlp.pipe(transcripts, n_process=num_processes_to_use))
         
     return docs
 
@@ -181,7 +187,7 @@ def get_sentiment_stats_chunk(rows: list[list[pd.Series]]):
 
 
 def get_sentiment_stats(data: pd.DataFrame):
-    num_chunks = cpu_count()
+    num_chunks = num_processes_to_use
     chunk_size = int(np.ceil(len(data) / num_chunks))
     sentiment_stats_list = []
 
@@ -194,6 +200,42 @@ def get_sentiment_stats(data: pd.DataFrame):
 
     sentiment_stats = pd.DataFrame([item for sublist in sentiment_stats_list for item in sublist])
     return sentiment_stats
+
+
+def get_sentics_for_word(word: str):
+    try:
+        concept = sentic.concept(word)
+
+        sentics: dict[str, float] = concept["sentics"]
+        emotions = {f"sentic_emotion_{key}": float(value) for key, value in sentics.items()}
+        
+        moodtags: list[str] = concept["moodtags"]
+        moods = {f"sentic_mood_{moodtag[1:]}": 1 for moodtag in moodtags}
+
+        return emotions, moods
+    except:
+        return None, None
+
+
+def get_sentic_ratios(doc: Doc):
+    sentic_sums: dict[str, float] = {}
+
+    for token in doc:
+        emotions, moods = get_sentics_for_word(token.lemma_)
+
+        if not emotions or not moods:
+            continue
+
+        for key, value in emotions.items():
+            sentic_sums[key] = sentic_sums.get(key, 0) + value
+        
+        for key, value in moods.items():
+            sentic_sums[key] = sentic_sums.get(key, 0) + value
+        
+    doc_len = len(doc)
+    sentic_ratios = {f"{key}_ratio": value / doc_len for key, value in sentic_sums.items()}
+
+    return pd.Series(sentic_ratios)
 
 
 ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision", "Job_Description"]
@@ -233,9 +275,14 @@ def extract_all_features(data: pd.DataFrame):
 
     sentiment_stats = get_sentiment_stats(data_with_transcript_docs)
 
+
+    print("Getting sentic emotion and mood ratios...")
+
+    full_sentic_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_sentic_ratios).fillna(0)
+
     print("Cleaning up...")
 
-    data_with_features = pd.concat([
+    feature_columns = [
         data,
         full_appraisal_ratios,
         interviewer_appraisal_ratios,
@@ -243,8 +290,11 @@ def extract_all_features(data: pd.DataFrame):
         full_attitudinal_ratios,
         interviewer_attitudinal_ratios,
         candidate_attitudinal_ratios,
-        sentiment_stats
-    ], axis=1)
+        sentiment_stats,
+        full_sentic_ratios
+    ]
+
+    data_with_features = pd.concat(feature_columns, axis=1).fillna(0)
 
     data_with_features.drop(columns=ignore_columns, axis=1, inplace=True)
 

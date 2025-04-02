@@ -33,6 +33,8 @@ def train_model(data: pd.DataFrame):
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
 
+    return model
+
 
 def main(input_file: str):
     data_with_features = pd.read_csv(input_file)
