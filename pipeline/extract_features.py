@@ -3,63 +3,15 @@ import time
 from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
-import spacy
 from spacy.tokens import Doc
 from textblob import TextBlob
 from senticnet.senticnet import SenticNet
 
 
-nlp = spacy.load("en_core_web_sm")
-
-
 sentic = SenticNet()
 
+
 num_processes_to_use = cpu_count() // 2
-
-
-def separate_interviewer_and_candidate_transcripts(row: pd.Series):
-    transcript: str = row["Transcript"]
-
-    lines = transcript.split("\n")
-    interviewer_lines = [line for line in lines if line.startswith("INTERVIEWER:")]
-    candidate_lines = [line for line in lines if line.startswith("CANDIDATE:")]
-
-    full_transcript = "\n".join([line.split(": ")[1] for line in lines])
-    interviewer_transcript = "\n".join([line.split(": ")[1] for line in interviewer_lines])
-    candidate_transcript = "\n".join([line.split(": ")[1] for line in candidate_lines])
-
-    result_dict = {
-        "full_transcript": full_transcript, 
-        "interviewer_transcript": interviewer_transcript, 
-        "candidate_transcript": candidate_transcript
-    }
-
-    return pd.Series(data=result_dict)
-
-
-def get_transcript_docs(transcripts: pd.Series):
-    with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
-        docs = list(nlp.pipe(transcripts, n_process=num_processes_to_use))
-        
-    return docs
-
-
-def get_data_with_transcript_docs(data: pd.DataFrame):
-    separated_transcripts = data.apply(separate_interviewer_and_candidate_transcripts, axis=1)
-
-    full_transcript_docs = get_transcript_docs(separated_transcripts["full_transcript"])
-    interviewer_transcript_docs = get_transcript_docs(separated_transcripts["interviewer_transcript"])
-    candidate_transcript_docs = get_transcript_docs(separated_transcripts["candidate_transcript"])
-
-    transcript_docs_dict = {
-        "full_transcript_doc": full_transcript_docs,
-        "interviewer_transcript_doc": interviewer_transcript_docs,
-        "candidate_transcript_doc": candidate_transcript_docs,
-    }
-
-    transcript_docs_df = pd.DataFrame(data=transcript_docs_dict)
-
-    return pd.concat([data, transcript_docs_df], axis=1)
 
 
 def get_word_category_ratios(doc: Doc, categories: dict[str, list[str]]):
@@ -242,43 +194,38 @@ ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision",
 
 
 def extract_all_features(data: pd.DataFrame):
-    print("Processing transcripts...")
-
-    data_with_transcript_docs = get_data_with_transcript_docs(data)
-
-
     print("Getting appraisal category ratios...")
 
-    full_appraisal_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_appraisal_ratios)
+    full_appraisal_ratios = data["full_transcript_doc"].apply(get_appraisal_ratios)
     full_appraisal_ratios = get_ratios_with_renamed_columns(full_appraisal_ratios, "full")
 
-    interviewer_appraisal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_appraisal_ratios)
+    interviewer_appraisal_ratios = data["interviewer_transcript_doc"].apply(get_appraisal_ratios)
     interviewer_appraisal_ratios = get_ratios_with_renamed_columns(interviewer_appraisal_ratios, "interviewer")
 
-    candidate_appraisal_ratios = data_with_transcript_docs["candidate_transcript_doc"].apply(get_appraisal_ratios)
+    candidate_appraisal_ratios = data["candidate_transcript_doc"].apply(get_appraisal_ratios)
     candidate_appraisal_ratios = get_ratios_with_renamed_columns(candidate_appraisal_ratios, "candidate")
 
 
     print("Getting attitudinal adjective ratios...")
     
-    full_attitudinal_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_attitudinal_ratios)
+    full_attitudinal_ratios = data["full_transcript_doc"].apply(get_attitudinal_ratios)
     full_attitudinal_ratios = get_ratios_with_renamed_columns(full_attitudinal_ratios, "full")
     
-    interviewer_attitudinal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_attitudinal_ratios)
+    interviewer_attitudinal_ratios = data["interviewer_transcript_doc"].apply(get_attitudinal_ratios)
     interviewer_attitudinal_ratios = get_ratios_with_renamed_columns(interviewer_attitudinal_ratios, "interviewer")
 
-    candidate_attitudinal_ratios = data_with_transcript_docs["candidate_transcript_doc"].apply(get_attitudinal_ratios)
+    candidate_attitudinal_ratios = data["candidate_transcript_doc"].apply(get_attitudinal_ratios)
     candidate_attitudinal_ratios = get_ratios_with_renamed_columns(candidate_attitudinal_ratios, "candidate")
 
 
     print("Getting sentiment statistics...")
 
-    sentiment_stats = get_sentiment_stats(data_with_transcript_docs)
+    sentiment_stats = get_sentiment_stats(data)
 
 
     print("Getting sentic emotion and mood ratios...")
 
-    full_sentic_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_sentic_ratios).fillna(0)
+    full_sentic_ratios = data["full_transcript_doc"].apply(get_sentic_ratios).fillna(0)
 
     print("Cleaning up...")
 
