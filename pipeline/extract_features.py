@@ -3,7 +3,8 @@ import time
 from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
-from spacy.tokens import Doc
+import spacy
+from spacy.tokens import Doc, DocBin
 from textblob import TextBlob
 from senticnet.senticnet import SenticNet
 
@@ -190,6 +191,20 @@ def get_sentic_ratios(doc: Doc):
     return pd.Series(sentic_ratios)
 
 
+def get_docs_from_disk(doc_bins_folder: str):
+    nlp = spacy.load("en_core_web_sm").from_disk(f"{doc_bins_folder}/nlp")
+
+    full_transcript_doc_bin = DocBin().from_disk(f"{doc_bins_folder}/full.spacy")
+    interviewer_transcript_doc_bin = DocBin().from_disk(f"{doc_bins_folder}/interviewer.spacy")
+    candidate_transcript_doc_bin = DocBin().from_disk(f"{doc_bins_folder}/candidate.spacy")
+
+    return pd.DataFrame({
+        "full_transcript_doc": [doc for doc in full_transcript_doc_bin.get_docs(nlp.vocab)],
+        "interviewer_transcript_doc": [doc for doc in interviewer_transcript_doc_bin.get_docs(nlp.vocab)],
+        "candidate_transcript_doc": [doc for doc in candidate_transcript_doc_bin.get_docs(nlp.vocab)],
+    })
+
+
 ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision", "Job_Description"]
 
 
@@ -248,13 +263,17 @@ def extract_all_features(data: pd.DataFrame):
     return data_with_features
 
 
-def main(input_file: str, output_file: str):
+def main(input_file: str, doc_bins_folder: str, output_file: str):
     print("Reading from", input_file)
     data = pd.read_csv(input_file)
 
+    print("Getting docs from", doc_bins_folder)
+    transcript_docs = get_docs_from_disk(doc_bins_folder)
+    data_with_transcript_docs = pd.concat([data, transcript_docs], axis=1)
+
     print("Extracting features...")
     start_time = time.time()
-    data_with_features = extract_all_features(data)
+    data_with_features = extract_all_features(data_with_transcript_docs)
 
     end_time = time.time()
     print("Done in", end_time - start_time, "seconds. Saving to", output_file)
@@ -262,11 +281,12 @@ def main(input_file: str, output_file: str):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python3 pipeline/extract_features.py <input_file> <output_file>")
+    if len(sys.argv) != 4:
+        print("Usage: python3 pipeline/extract_features.py <input_file> <doc_bins_folder> <output_file>")
     
     else:
         input_file = sys.argv[1]
-        output_file = sys.argv[2]
+        doc_bins_folder = sys.argv[2]
+        output_file = sys.argv[3]
 
-        main(input_file, output_file)
+        main(input_file, doc_bins_folder, output_file)

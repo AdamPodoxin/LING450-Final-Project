@@ -69,6 +69,8 @@ def main(input_file: str, output_folder: str):
     interviewer_transcript_doc_bin.to_disk(f"{output_folder}/interviewer.spacy")
     candidate_transcript_doc_bin.to_disk(f"{output_folder}/candidate.spacy")
 
+    nlp.to_disk(f"{output_folder}/nlp")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
