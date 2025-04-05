@@ -205,7 +205,17 @@ def get_docs_from_disk(doc_bins_folder: str):
     })
 
 
-ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision", "Job_Description"]
+ignore_columns = [
+    "Name", 
+    "Role", 
+    "Transcript", 
+    "full_transcript_doc", 
+    "interviewer_transcript_doc", 
+    "candidate_transcript_doc", 
+    "Resume", 
+    "Reason_for_decision", 
+    "Job_Description"
+]
 
 
 def extract_all_features(data: pd.DataFrame):
