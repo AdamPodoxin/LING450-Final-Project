@@ -4,62 +4,15 @@ from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
 import spacy
-from spacy.tokens import Doc
+from spacy.tokens import Doc, DocBin
 from textblob import TextBlob
 from senticnet.senticnet import SenticNet
 
 
-nlp = spacy.load("en_core_web_sm")
-
-
 sentic = SenticNet()
 
+
 num_processes_to_use = cpu_count() // 2
-
-
-def separate_interviewer_and_candidate_transcripts(row: pd.Series):
-    transcript: str = row["Transcript"]
-
-    lines = transcript.split("\n")
-    interviewer_lines = [line for line in lines if line.startswith("INTERVIEWER:")]
-    candidate_lines = [line for line in lines if line.startswith("CANDIDATE:")]
-
-    full_transcript = "\n".join([line.split(": ")[1] for line in lines])
-    interviewer_transcript = "\n".join([line.split(": ")[1] for line in interviewer_lines])
-    candidate_transcript = "\n".join([line.split(": ")[1] for line in candidate_lines])
-
-    result_dict = {
-        "full_transcript": full_transcript, 
-        "interviewer_transcript": interviewer_transcript, 
-        "candidate_transcript": candidate_transcript
-    }
-
-    return pd.Series(data=result_dict)
-
-
-def get_transcript_docs(transcripts: pd.Series):
-    with nlp.select_pipes(enable=["tok2vec", "tagger", "attribute_ruler", "lemmatizer"]):
-        docs = list(nlp.pipe(transcripts, n_process=num_processes_to_use))
-        
-    return docs
-
-
-def get_data_with_transcript_docs(data: pd.DataFrame):
-    separated_transcripts = data.apply(separate_interviewer_and_candidate_transcripts, axis=1)
-
-    full_transcript_docs = get_transcript_docs(separated_transcripts["full_transcript"])
-    interviewer_transcript_docs = get_transcript_docs(separated_transcripts["interviewer_transcript"])
-    candidate_transcript_docs = get_transcript_docs(separated_transcripts["candidate_transcript"])
-
-    transcript_docs_dict = {
-        "full_transcript_doc": full_transcript_docs,
-        "interviewer_transcript_doc": interviewer_transcript_docs,
-        "candidate_transcript_doc": candidate_transcript_docs,
-    }
-
-    transcript_docs_df = pd.DataFrame(data=transcript_docs_dict)
-
-    return pd.concat([data, transcript_docs_df], axis=1)
 
 
 def get_word_category_ratios(doc: Doc, categories: dict[str, list[str]]):
@@ -238,47 +191,66 @@ def get_sentic_ratios(doc: Doc):
     return pd.Series(sentic_ratios)
 
 
-ignore_columns = ["Name", "Role", "Transcript", "Resume", "Reason_for_decision", "Job_Description"]
+def get_docs_from_disk(doc_bins_folder: str):
+    nlp = spacy.load("en_core_web_sm").from_disk(f"{doc_bins_folder}/nlp")
+
+    full_transcript_doc_bin = DocBin().from_disk(f"{doc_bins_folder}/full.spacy")
+    interviewer_transcript_doc_bin = DocBin().from_disk(f"{doc_bins_folder}/interviewer.spacy")
+    candidate_transcript_doc_bin = DocBin().from_disk(f"{doc_bins_folder}/candidate.spacy")
+
+    return pd.DataFrame({
+        "full_transcript_doc": [doc for doc in full_transcript_doc_bin.get_docs(nlp.vocab)],
+        "interviewer_transcript_doc": [doc for doc in interviewer_transcript_doc_bin.get_docs(nlp.vocab)],
+        "candidate_transcript_doc": [doc for doc in candidate_transcript_doc_bin.get_docs(nlp.vocab)],
+    })
+
+
+ignore_columns = [
+    "Name", 
+    "Role", 
+    "Transcript", 
+    "full_transcript_doc", 
+    "interviewer_transcript_doc", 
+    "candidate_transcript_doc", 
+    "Resume", 
+    "Reason_for_decision", 
+    "Job_Description"
+]
 
 
 def extract_all_features(data: pd.DataFrame):
-    print("Processing transcripts...")
-
-    data_with_transcript_docs = get_data_with_transcript_docs(data)
-
-
     print("Getting appraisal category ratios...")
 
-    full_appraisal_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_appraisal_ratios)
+    full_appraisal_ratios = data["full_transcript_doc"].apply(get_appraisal_ratios)
     full_appraisal_ratios = get_ratios_with_renamed_columns(full_appraisal_ratios, "full")
 
-    interviewer_appraisal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_appraisal_ratios)
+    interviewer_appraisal_ratios = data["interviewer_transcript_doc"].apply(get_appraisal_ratios)
     interviewer_appraisal_ratios = get_ratios_with_renamed_columns(interviewer_appraisal_ratios, "interviewer")
 
-    candidate_appraisal_ratios = data_with_transcript_docs["candidate_transcript_doc"].apply(get_appraisal_ratios)
+    candidate_appraisal_ratios = data["candidate_transcript_doc"].apply(get_appraisal_ratios)
     candidate_appraisal_ratios = get_ratios_with_renamed_columns(candidate_appraisal_ratios, "candidate")
 
 
     print("Getting attitudinal adjective ratios...")
     
-    full_attitudinal_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_attitudinal_ratios)
+    full_attitudinal_ratios = data["full_transcript_doc"].apply(get_attitudinal_ratios)
     full_attitudinal_ratios = get_ratios_with_renamed_columns(full_attitudinal_ratios, "full")
     
-    interviewer_attitudinal_ratios = data_with_transcript_docs["interviewer_transcript_doc"].apply(get_attitudinal_ratios)
+    interviewer_attitudinal_ratios = data["interviewer_transcript_doc"].apply(get_attitudinal_ratios)
     interviewer_attitudinal_ratios = get_ratios_with_renamed_columns(interviewer_attitudinal_ratios, "interviewer")
 
-    candidate_attitudinal_ratios = data_with_transcript_docs["candidate_transcript_doc"].apply(get_attitudinal_ratios)
+    candidate_attitudinal_ratios = data["candidate_transcript_doc"].apply(get_attitudinal_ratios)
     candidate_attitudinal_ratios = get_ratios_with_renamed_columns(candidate_attitudinal_ratios, "candidate")
 
 
     print("Getting sentiment statistics...")
 
-    sentiment_stats = get_sentiment_stats(data_with_transcript_docs)
+    sentiment_stats = get_sentiment_stats(data)
 
 
     print("Getting sentic emotion and mood ratios...")
 
-    full_sentic_ratios = data_with_transcript_docs["full_transcript_doc"].apply(get_sentic_ratios).fillna(0)
+    full_sentic_ratios = data["full_transcript_doc"].apply(get_sentic_ratios).fillna(0)
 
     print("Cleaning up...")
 
@@ -301,13 +273,17 @@ def extract_all_features(data: pd.DataFrame):
     return data_with_features
 
 
-def main(input_file: str, output_file: str):
+def main(input_file: str, doc_bins_folder: str, output_file: str):
     print("Reading from", input_file)
     data = pd.read_csv(input_file)
 
+    print("Getting docs from", doc_bins_folder)
+    transcript_docs = get_docs_from_disk(doc_bins_folder)
+    data_with_transcript_docs = pd.concat([data, transcript_docs], axis=1)
+
     print("Extracting features...")
     start_time = time.time()
-    data_with_features = extract_all_features(data)
+    data_with_features = extract_all_features(data_with_transcript_docs)
 
     end_time = time.time()
     print("Done in", end_time - start_time, "seconds. Saving to", output_file)
@@ -315,11 +291,12 @@ def main(input_file: str, output_file: str):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python3 pipeline/extract_features.py <input_file> <output_file>")
+    if len(sys.argv) != 4:
+        print("Usage: python3 pipeline/extract_features.py <input_file> <doc_bins_folder> <output_file>")
     
     else:
         input_file = sys.argv[1]
-        output_file = sys.argv[2]
+        doc_bins_folder = sys.argv[2]
+        output_file = sys.argv[3]
 
-        main(input_file, output_file)
+        main(input_file, doc_bins_folder, output_file)

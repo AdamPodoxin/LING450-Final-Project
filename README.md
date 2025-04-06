@@ -40,16 +40,29 @@ CANDIDATE: says something...
 Note that although there are many different rules we built in for properly extracting the intreviewer and candidate speech, there are some cases where we were not able to do this for a small number of transcripts.
 The number of removed transcripts is printed to the command line when the script finishes.
 
+## Get docs
+
+We use spaCy to do some of our analysis, so we need to convert our transcripts to spaCy Docs.
+This step is quite resource-intensive and takes some time, so we can do this once, serialize them to a file, and then load them whenever we need to extract features later.
+To do this, run the command
+
+```bash
+python3 pipeline/get_docs.py <input_file> <output_folder>
+```
+
+All of the required data is saved to the output folder (e.g. `data/transcript_docs`).
+
 ## Extract features
 
 We extract features relevant to appraisal analysis.
 To do this on the (cleaned) data, run the command
 
 ```bash
-python3 pipeline/extract_features.py <input_file> <output_file>
+python3 pipeline/extract_features.py <input_file> <doc_bins_folder> <output_file>
 ```
 
-The input file is a csv containing the interview transcripts (e.g. `data/dataset_cleaned.csv_`) and the output file will contain all the features we use for training the model.
+The input file is a csv containing the interview transcripts (e.g. `data/dataset_cleaned.csv`) and the output file will contain all the features we use for training the model.
+The doc bins folder is the folder where you saved the transcript Docs from the previous step.
 
 ## Train the model
 
