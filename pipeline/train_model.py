@@ -33,6 +33,14 @@ def train_model(data: pd.DataFrame):
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
 
+    feature_importances_df = pd.DataFrame(model.feature_importances_, index=X.columns, columns=["importance"])\
+                            .sort_values("importance", ascending=False)
+    print("\nFeature Importances:")
+    print(feature_importances_df)
+
+    feature_importances_df.to_csv("feature_importances.csv", index=True)
+    print("\nFeature importances saved to feature_importances.csv")
+
     return model
 
 
