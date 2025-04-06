@@ -15,6 +15,7 @@ Packages:
 - `spacy`
 - `textblob`
 - `sklearn`
+- `senticnet`
 
 # Pipeline
 
